@@ -1,0 +1,49 @@
+'rejected']])a.append(button(label,async()=>{if(x.expires_at&&new Date(x.expires_at)<new Date()){notify('Proposta expirada.');return}if(!confirm(`${label} esta proposta?`))return;try{await update('sm_proposals',x.id,{status});notify('Proposta atualizada');render()}catch(e){notify(e.message)}}));}
+    if(['accepted','countered'].includes(x.status)&&(staff.role==='owner'||staff.can_manage_sales===true)){
+      const create=button('Gerar venda',async()=>{
+        if(!confirm('Gerar uma venda desta proposta aceita? O pagamento NÃO será confirmado automaticamente.'))return;
+        create.disabled=true;
+        try{const {data,error}=await sb.rpc('sm_create_sale_from_proposal',{p_proposal_id:x.id});if(error)throw error;if(!data)throw Error('Venda não criada.');current='sales';page=0;filter='';history.replaceState(null,'','#sales');await render();notify('Venda registrada. Confirme o pagamento apenas após receber o valor.')}catch(e){notify('Falha ao gerar venda: '+e.message)}finally{create.disabled=false}
+      },'btn');a.append(create)
+    }
+    return[x.buyer_id.slice(0,8),x.product_id.slice(0,8),money(x.offered_amount),x.status,date(x.expires_at),a]}));paginate(p,data.length)}
+async function createCounteroffer(proposal){
+  const amount=prompt('Novo valor da contraproposta (R$):');
+  if(amount===null)return;
+  if(proposal.expires_at&&new Date(proposal.expires_at)<new Date())throw Error('Proposta expirada.');const value=checkAmount(amount.replace(',','.'));
+  const message=prompt('Mensagem ao comprador (opcional):')||null;
+  if(!confirm(`Enviar contraproposta de ${money(value)}?`))return;
+  const existing=await sb.from('sm_counteroffers').select('id').eq('proposal_id',proposal.id).is('buyer_response',null).limit(1);
+  if(existing.error)throw existing.error;
+  if(existing.data?.length)throw Error('Já existe uma contraproposta sem resposta.');
+  await writeResult(sb.from('sm_counteroffers').insert({proposal_id:proposal.id,amount:value,message,created_by:session.id}).select('id'));
+  notify('Contraproposta registrada.');await render();
+}
+async function counteroffers(host){const p=section('Histórico de contrapropostas');host.append(p);toolbar(p);const r=await query('sm_counteroffers','id,proposal_id,amount,message,buyer_response,created_at',{order:'created_at',range:[0,499]});const data=r.data.filter(x=>`${x.proposal_id} ${x.buyer_response} ${x.message}`.toLowerCase().includes(filter));table(p,['Proposta','Valor','Mensagem','Resposta','Data'],data.slice(page*limit,(page+1)*limit).map(x=>[x.proposal_id.slice(0,8),money(x.amount),x.message,x.buyer_response||'Pendente',date(x.created_at)]));paginate(p,data.length)}
+// Confirmação de pagamento: a operação financeira/estoque ocorre exclusivamente no PostgreSQL.
+let paymentInProgress = new Set();
+async function confirmSalePayment(sale, actionButton){
+  if(!(staff.role==='owner'||(staff.role==='employee'&&staff.can_manage_sales===true))){
+    notify('Você não possui permissão para gerenciar vendas.');return;
+  }
+  if(sale.status!=='negotiating'||sale.stock_deducted||sale.paid_at){
+    notify('Esta venda não pode ser confirmada neste estado.');return;
+  }
+  if(paymentInProgress.has(sale.id))return;
+  if(!window.confirm(`Confirmar pagamento de ${money(sale.total_amount)}?\n\nVenda: ${sale.id}\nQuantidade: ${sale.quantity}\n\nEsta ação registrará o pagamento e descontará o estoque. Não pode ser desfeita pelo painel.`))return;
+  paymentInProgress.add(sale.id);
+  actionButton.disabled=true;
+  actionButton.textContent='Processando…';
+  try{
+    const {error}=await sb.rpc('sm_confirm_sale_payment',{p_sale_id:sale.id});
+    if(error)throw error;
+    await render();
+    notify('Pagamento confirmado. Estoque e auditoria atualizados pelo banco.');
+  }catch(e){
+    notify('Pagamento não confirmado: '+(e.message||'Erro desconhecido'));
+    actionButton.disabled=false;
+    actionButton.textContent='Confirmar pagamento';
+  }finally{paymentInProgress.delete(sale.id)}
+}
+async function sales(host){
+  const p=se
