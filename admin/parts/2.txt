@@ -1,0 +1,21 @@
+x=>`${x.code||''} ${x.title||''}`.toLowerCase().includes(filter));
+  table(p,['Código','Equipamento','Quantidade','Status','Ação'],data.slice(page*limit,(page+1)*limit).map(x=>{
+    const a=el('div',null,'actions');const b=button('Ajustar estoque',async()=>{
+      const raw=prompt(`Ajustar estoque de ${x.title} (atual: ${x.stock}).\nInforme a variação: +5 para entrada, -2 para saída.`);
+      if(raw===null)return;const delta=Number(raw.trim());
+      if(!Number.isSafeInteger(delta)||delta===0){notify('Informe um número inteiro diferente de zero.');return}
+      const reason=prompt('Motivo obrigatório da movimentação (mínimo 6 caracteres):');
+      if(reason===null)return;
+      if(reason.trim().length<6){notify('Informe um motivo com pelo menos 6 caracteres.');return}
+      if(!confirm(`Registrar movimentação de ${delta>0?'+':''}${delta} unidade(s) de ${x.title}?`))return;
+      b.disabled=true;
+      try{const {error}=await sb.rpc('sm_adjust_stock',{p_product_id:x.id,p_delta:delta,p_reason:reason.trim()});if(error)throw error;await render();notify('Estoque atualizado com movimentação e auditoria.')}catch(e){notify('Ajuste não realizado: '+e.message)}finally{b.disabled=false}
+    });a.append(b);return[x.code||'—',x.title,x.stock,x.status,a]
+  }));paginate(p,data.length);
+  const history=section('Últimas movimentações');host.append(history);
+  try{const movements=await query('sm_stock_movements','id,product_id,delta,reason,sale_id,created_at',{order:'created_at',range:[0,29]});table(history,['Data','Produto','Variação','Motivo','Venda'],movements.data.map(x=>[date(x.created_at),x.product_id.slice(0,8),x.delta,x.reason,x.sale_id?x.sale_id.slice(0,8):'—']))}catch(e){history.append(el('p','Movimentações indisponíveis: '+e.message,'muted'))}
+}
+
+async function generic(host,tableName,title,columns,searchFields=[]){const p=section(title);host.append(p);toolbar(p);const r=await query(tableName,columns.join(','),{order:columns.includes('created_at')?'created_at':undefined,range:[0,499]});const data=r.data.filter(x=>searchFields.length===0||searchFields.some(k=>String(x[k]??'').toLowerCase().includes(filter)));table(p,columns.map(x=>x.replaceAll('_',' ')),data.slice(page*limit,(page+1)*limit).map(x=>columns.map(k=>k.includes('amount')||k==='price'?money(x[k]):k.endsWith('_at')?date(x[k]):typeof x[k]==='object'?JSON.stringify(x[k]):String(x[k]??'—'))));paginate(p,data.length)}
+async function customers(host){const p=section('Cadastros de compradores');host.append(p);toolbar(p);const r=await query('sm_profiles','id,full_name,phone,city,approval_status,created_at',{order:'created_at',range:[0,499]});const data=r.data.filter(x=>`${x.full_name} ${x.phone} ${x.city}`.toLowerCase().includes(filter));table(p,['Cliente','Telefone','Cidade','Status','Cadastro','Ações'],data.slice(page*limit,(page+1)*limit).map(x=>{const a=el('div',null,'actions');if(x.approval_status==='pending')for(const [label,status]of [['Aprovar','approved'],['Recusar','rejected']])a.append(button(label,async()=>{if(!confirm(`${label} o cadastro de ${x.full_name}?`))return;try{await update('sm_profiles',x.id,{approval_status:status});notify('Cadastro atualizado');render()}catch(e){notify(e.message)}}));return[x.full_name,x.phone,x.city,x.approval_status,date(x.created_at),a]}));paginate(p,data.length)}
+async function proposals(host){const p=section('Propostas privadas');host.append(p);toolbar(p);const r=await query('sm_proposals','id,buyer_id,product_id,offered_amount,status,expires_at,created_at',{order:'created_at',range:[0,499]});const data=r.data.filter(x=>`${x.id} ${x.buyer_id} ${x.product_id} ${x.status}`.toLowerCase().includes(filter));table(p,['Comprador','Produto','Oferta','Status','Validade','Ações'],data.slice(page*limit,(page+1)*limit).map(x=>{const a=el('div',null,'actions');if(x.status==='pending'){a.append(button('Contraproposta',async()=>{try{await createCounteroffer(x)}catch(e){notify(e.message)}}));for(const [label,status]of [['Aceitar','accepted'],['Recusar',

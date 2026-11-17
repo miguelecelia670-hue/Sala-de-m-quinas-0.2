@@ -1,0 +1,35 @@
+ction('Vendas e confirmação de pagamentos');host.append(p);
+  p.append(el('p','O pagamento só deve ser confirmado após a comprovação do recebimento. A baixa de estoque é executada de forma transacional no Supabase.','muted'));
+  toolbar(p,'Buscar por venda, produto ou status');
+  const r=await query('sm_sales','id,proposal_id,buyer_id,product_id,quantity,total_amount,status,paid_at,stock_deducted,created_at',{order:'created_at',range:[0,499]});
+  const data=r.data.filter(x=>`${x.id} ${x.product_id} ${x.buyer_id} ${x.status}`.toLowerCase().includes(filter));
+  table(p,['Venda','Produto','Quantidade','Valor','Status','Pagamento','Estoque','Ações'],data.slice(page*limit,(page+1)*limit).map(x=>{
+    const actions=el('div',null,'actions');
+    if((staff.role==='owner'||(staff.role==='employee'&&staff.can_manage_sales===true))&&x.status==='negotiating'&&!x.stock_deducted&&!x.paid_at){
+      const b=button('Confirmar pagamento',()=>confirmSalePayment(x,b),'btn');
+      b.disabled=paymentInProgress.has(x.id);actions.append(b);
+    }else{actions.append(el('span',x.status==='paid'?'Pagamento registrado':'Indisponível','muted'))}
+    return[x.id.slice(0,8),x.product_id.slice(0,8),x.quantity,money(x.total_amount),x.status,date(x.paid_at),x.stock_deducted?'Baixado':'Não baixado',actions];
+  }));paginate(p,data.length);
+}
+async function render(){const m=modules.find(x=>x[0]===current);if(!m||!allowed(m)){current='overview';return render()}$('#heading').textContent=m[1];const host=$('#content');host.replaceChildren(el('div',null,'skeleton'));try{host.replaceChildren();if(current==='overview')await overview(host);else if(current==='products')await products(host);else if(current==='customers')await customers(host);else if(current==='proposals')await proposals(host);else if(current==='counteroffers')await counteroffers(host);else if(current==='categories')await generic(host,'sm_categories','Categorias',['id','name','active'],['name']);else if(current==='stock')await stock(host);else if(current==='sales')await sales(host);else if(current==='staff')await generic(host,'sm_staff','Funcionários e permissões (consulta)',['user_id','role','can_manage_products','can_manage_proposals','can_manage_sales','can_manage_customers','created_at'],['role']);else if(current==='audit')await generic(host,'sm_audit','Histórico de auditoria',['created_at','action','resource','resource_id','actor_id','detail'],[]);else host.append(el('p','Configurações requerem verificação da estrutura e das políticas do banco antes de habilitar alterações.','muted'))}catch(e){host.replaceChildren(el('div','Consulta bloqueada ou indisponível: '+e.message,'panel'))}}
+const auth=await sb.auth.getUser();if(auth.error||!auth.data.user){location.replace('/login/?next=%2Fadmin%2F');return}session=auth.data.user;const r=await sb.from('sm_staff').select('*').eq('user_id',session.id).maybeSingle();if(r.error||!r.data){$('#loading').textContent='Acesso administrativo não autorizado. Sua conta não possui permissões no painel.';return}staff=r.data;$('#loading').hidden=true;$('#app').hidden=false;$('#email').textContent=session.email;for(const m of modules.filter(allowed)){const b=button(m[1],()=>{current=m[0];page=0;filter='';selection=null;history.replaceState(null,'','#'+current);$('#sidebar').classList.remove('open');[...$('#nav').children].forEach(x=>x.classList.toggle('active',x===b));render()});b.className=m[0]===current?'active':'';$('#nav').append(b)}$('#menu').onclick=()=>$('#sidebar').classList.toggle('open');
+const headerLogout=document.createElement('button');
+headerLogout.type='button';headerLogout.id='logoutHeader';headerLogout.className='btn danger admin-logout';
+headerLogout.textContent='Sair da conta';headerLogout.setAttribute('aria-label','Sair da conta');
+$('.user').append(headerLogout);
+async function signOutAdmin(){
+  const buttons=[$('#logout'),headerLogout];
+  buttons.forEach(b=>{b.disabled=true;b.setAttribute('aria-busy','true')});
+  try{
+    const {error}=await sb.auth.signOut();
+    if(error)throw error;
+    location.replace('/#catalogo');
+  }catch(err){
+    notify('Não foi possível sair da conta: '+(err.message||'Tente novamente.'));
+    buttons.forEach(b=>{b.disabled=false;b.removeAttribute('aria-busy')});
+  }
+}
+$('#logout').onclick=signOutAdmin;headerLogout.onclick=signOutAdmin;
+const hash=location.hash.slice(1);if(modules.some(x=>x[0]===hash&&allowed(x)))current=hash;[...$('#nav').children].forEach((b,i)=>b.classList.toggle('active',modules.filter(allowed)[i]?.[0]===current));await render();
+})().catch(e=>{const gate=document.getElementById('loading');if(gate)gate.textContent='Falha ao iniciar painel: '+e.message});
